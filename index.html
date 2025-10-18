@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lunch Feedback — Dining Board</title>
+  <style>
+    .header{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+    .logo{height:40px;width:auto}
+
+    :root{--fg:#0f172a;--muted:#64748b;--bg:#f8fafc;--card:#ffffff;--acc:#2563eb;--ok:#16a34a;}
+    *{box-sizing:border-box;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    body{margin:0;background:var(--bg);color:var(--fg)}
+    .wrap{max-width:920px;margin:24px auto;padding:16px}
+    .card{background:var(--card);border-radius:16px;box-shadow:0 2px 12px rgba(2,6,23,.06);padding:20px}
+    h1{font-size:24px;margin:0 0 6px}
+    .muted{color:var(--muted)}
+    .tabs{display:flex;gap:8px;margin:16px 0}
+    .tab{flex:1;padding:10px 12px;border:1px solid #e2e8f0;border-radius:999px;text-align:center;cursor:pointer;background:#fff}
+    .tab.active{background:var(--acc);color:#fff;border-color:var(--acc)}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 380px}
+    textarea,input[type="text"]{width:100%;padding:10px;border:1px solid #e2e8f0;border-radius:10px;background:#fff}
+    textarea{min-height:88px}
+    button{padding:10px 14px;border:0;border-radius:10px;background:var(--acc);color:#fff;cursor:pointer}
+    button.secondary{background:#0ea5e9}
+    .menu{white-space:pre-wrap;background:#f1f5f9;border-radius:12px;padding:12px;border:1px solid #e2e8f0}
+    .item{padding:10px 0;border-bottom:1px dashed #e2e8f0}
+    .item:last-child{border-bottom:0}
+    .badge{display:inline-block;background:#e2e8f0;padding:2px 8px;border-radius:999px;font-size:12px;margin-left:6px}
+    .admin{margin-top:6px;display:none}
+    .foot{margin-top:18px;font-size:12px;color:var(--muted)}
+  </style>
+  <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="header">
+        <img class="logo" src="logo.png" alt="Pickering College"/>
+        <h1 style="margin:0">LUNCH FEEDBACK</h1>
+      </div>
+      <div class="muted">Anonymous student board for dining feedback. Be kind. Be specific. 💬</div>
+
+      <div style="margin-top:8px" class="muted" id="today"></div>
+
+      <div class="tabs">
+        <div class="tab active" data-meal="Breakfast">Breakfast</div>
+        <div class="tab" data-meal="Lunch">Lunch</div>
+        <div class="tab" data-meal="Dinner">Dinner</div>
+      </div>
+
+      <div class="row">
+        <div class="col">
+          <h3 style="margin:0 0 8px">Today’s Menu</h3>
+          <div id="menu" class="menu">Loading…</div>
+
+          <div class="admin" id="adminBox">
+            <h4>Update Menu (admin)</h4>
+            <textarea id="menuInput" placeholder="Type menu lines…"></textarea>
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+              <button id="saveMenu">Save Menu</button>
+              <span class="muted" id="saveStatus"></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="col">
+          <h3 style="margin:0 0 8px">Comments</h3>
+          <div id="list"></div>
+          <div style="margin-top:10px">
+            <textarea id="msg" maxlength="300" placeholder="e.g., “Too salty today”, “Loved the vegan curry”, “More fruit please”"></textarea>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
+              <button id="send">Post anonymously</button>
+              <span class="muted" id="postStatus"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="foot">
+        This is a student-run pilot. No names collected. Posts are public to readers of this page. Inappropriate content will be removed.
+        <br/>
+        Admin access: append <code>?admin=YOUR_SECRET</code> to the URL to edit menus.
+      </div>
+    </div>
+  </div>
+
+<script>
+  // For Firebase JS SDK v7.20.0 and later, measurementId is optional
+const firebaseConfig = {
+  apiKey: "AIzaSyDTDV5k38PjnNBGRq7Iar7qFMtNEv15_aU",
+  authDomain: "pickering-college-dining.firebaseapp.com",
+  projectId: "pickering-college-dining",
+  storageBucket: "pickering-college-dining.firebasestorage.app",
+  messagingSenderId: "59258765255",
+  appId: "1:59258765255:web:85c251387a5a43ffa523e2",
+  measurementId: "G-E16GGZ1LHQ"
+};
+  const ADMIN_KEY = "CHANGE_THIS_ADMIN_SECRET"; // set any random string; share only with you / food service
+
+  // ==== 2) Init ====
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.database();
+
+  const tabs = document.querySelectorAll('.tab');
+  const menuBox = document.getElementById('menu');
+  const listBox = document.getElementById('list');
+  const sendBtn = document.getElementById('send');
+  const msgInput = document.getElementById('msg');
+  const menuInput = document.getElementById('menuInput');
+  const saveBtn = document.getElementById('saveMenu');
+  const saveStatus = document.getElementById('saveStatus');
+  const postStatus = document.getElementById('postStatus');
+  const adminBox = document.getElementById('adminBox');
+
+  // Date key (local)
+  const today = new Date();
+  const pad = n => String(n).padStart(2,'0');
+  const dateKey = `${today.getFullYear()}-${pad(today.getMonth()+1)}-${pad(today.getDate())}`;
+  document.getElementById('today').textContent = `Date: ${dateKey}`;
+
+  // Admin detect
+  const params = new URLSearchParams(location.search);
+  const isAdmin = params.get('admin') === ADMIN_KEY;
+  adminBox.style.display = isAdmin ? 'block' : 'none';
+
+  let currentMeal = 'Breakfast';
+
+  function mealPath(sub){
+    return {
+      menu: `menus/${dateKey}/${sub}`,
+      comments: `comments/${dateKey}/${sub}`
+    };
+  }
+
+  function setActive(meal){
+    currentMeal = meal;
+    tabs.forEach(t=>t.classList.toggle('active', t.dataset.meal===meal));
+    loadMenu();
+    subscribeComments();
+  }
+
+  // Load menu text
+  function loadMenu(){
+    const path = mealPath(currentMeal).menu;
+    firebase.database().ref(path).get().then(snap=>{
+      const val = snap.val();
+      menuBox.textContent = val ? val : 'No menu posted yet.';
+      if(isAdmin) menuInput.value = val || '';
+    });
+  }
+
+  // Save menu (admin)
+  saveBtn && saveBtn.addEventListener('click', ()=>{
+    if(!isAdmin) return;
+    const path = mealPath(currentMeal).menu;
+    const text = menuInput.value.trim();
+    saveStatus.textContent = 'Saving…';
+    firebase.database().ref(path).set(text).then(()=>{
+      saveStatus.textContent = 'Saved ✅';
+      loadMenu();
+      setTimeout(()=> saveStatus.textContent='', 1500);
+    }).catch(()=>{
+      saveStatus.textContent = 'Error saving';
+    });
+  });
+
+  // Live comments
+  let commentsRef; // for cleanup
+  function subscribeComments(){
+    if(commentsRef) commentsRef.off();
+    listBox.innerHTML = 'Loading…';
+    const path = mealPath(currentMeal).comments;
+    commentsRef = firebase.database().ref(path).limitToLast(200);
+    commentsRef.on('value', snap=>{
+      const data = snap.val() || {};
+      const items = Object.values(data).sort((a,b)=>a.ts-b.ts);
+      if(items.length===0){
+        listBox.innerHTML = '<div class="muted">No comments yet. Be the first.</div>';
+        return;
+      }
+      listBox.innerHTML = items.map(it=>{
+        const d = new Date(it.ts || Date.now());
+        const time = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+        return `<div class="item">${escapeHtml(it.text)} <span class="badge">${time}</span></div>`;
+      }).join('');
+    });
+  }
+
+  // Post comment
+  sendBtn.addEventListener('click', ()=>{
+    const text = msgInput.value.trim().slice(0,300);
+    if(!text){ postStatus.textContent = 'Type something first.'; return; }
+    const path = mealPath(currentMeal).comments;
+    const id = firebase.database().ref().push().key;
+    const payload = { text, ts: Date.now() };
+    postStatus.textContent = 'Posting…';
+    firebase.database().ref(`${path}/${id}`).set(payload).then(()=>{
+      msgInput.value='';
+      postStatus.textContent = 'Posted ✅';
+      setTimeout(()=> postStatus.textContent='', 1200);
+    }).catch(()=>{
+      postStatus.textContent = 'Error. Try again.';
+    });
+  });
+
+  tabs.forEach(t=> t.addEventListener('click', ()=> setActive(t.dataset.meal)) );
+  setActive('Breakfast');
+
+  // simple HTML escape
+  function escapeHtml(s){
+    return s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));
+  }
+</script>
+
+</body>
+</html>
