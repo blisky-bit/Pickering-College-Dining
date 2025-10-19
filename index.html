@@ -32,6 +32,7 @@
     .foot{margin-top:18px;font-size:12px;color:var(--muted)}
   </style>
   <!-- Firebase SDKs -->
+  <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 </head>
@@ -45,6 +46,14 @@
       <div class="muted">Anonymous student board for dining feedback. Be kind. Be specific. 💬</div>
 
       <div style="margin-top:8px" class="muted" id="today"></div>
+      <div id="authBar" style="margin:12px 0; display:flex; gap:8px; align-items:center;">
+  <input id="email" type="email" placeholder="admin email" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+  <input id="pw" type="password" placeholder="password" style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;">
+  <button id="loginBtn">Admin login</button>
+  <button id="logoutBtn" style="display:none;background:#0ea5e9">Logout</button>
+  <span id="authStatus" class="muted"></span>
+</div>
+
 
       <div class="tabs">
         <div class="tab active" data-meal="Breakfast">Breakfast</div>
@@ -99,7 +108,7 @@ const firebaseConfig = {
   messagingSenderId: "59258765255",
   appId: "1:59258765255:web:85c251387a5a43ffa523e2"
 };
-const ADMIN_KEY = "pickering-secret"; // set any random string; share only with you / food service
+  // const ADMIN_KEY = "pickering-secret"; // set any random string; share only with you / food service
 
   // ==== 2) Init ====
   firebase.initializeApp(firebaseConfig);
@@ -115,7 +124,50 @@ const ADMIN_KEY = "pickering-secret"; // set any random string; share only with 
   const saveStatus = document.getElementById('saveStatus');
   const postStatus = document.getElementById('postStatus');
   const adminBox = document.getElementById('adminBox');
+let isAdmin = false;
+const auth = firebase.auth();
+const emailEl = document.getElementById('email');
+const pwEl = document.getElementById('pw');
+const loginBtn = document.getElementById('loginBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const authStatus = document.getElementById('authStatus');
 
+auth.onAuthStateChanged(async (user)=>{
+  if(!user){
+    isAdmin = false;
+    adminBox.style.display = 'none';
+    logoutBtn.style.display = 'none';
+    loginBtn.style.display = 'inline-block';
+    authStatus.textContent = '';
+    return;
+  }
+  try{
+    const snap = await db.ref('admins/'+user.uid).get();
+    isAdmin = snap.val() === true;
+  }catch(e){
+    isAdmin = false;
+  }
+  adminBox.style.display = isAdmin ? 'block' : 'none';
+  loginBtn.style.display = 'none';
+  logoutBtn.style.display = 'inline-block';
+  authStatus.textContent = isAdmin ? 'Admin signed in' : 'Signed in (not admin)';
+});
+
+loginBtn.addEventListener('click', async ()=>{
+  try{
+    await auth.signInWithEmailAndPassword(emailEl.value.trim(), pwEl.value.trim());
+    authStatus.textContent = 'Signed in';
+  }catch(e){
+    authStatus.textContent = 'Login failed';
+  }
+});
+
+logoutBtn.addEventListener('click', async ()=>{
+  await auth.signOut();
+  emailEl.value = '';
+  pwEl.value = '';
+  authStatus.textContent = 'Signed out';
+});
   // Date key (local)
   const today = new Date();
   const pad = n => String(n).padStart(2,'0');
@@ -123,9 +175,9 @@ const ADMIN_KEY = "pickering-secret"; // set any random string; share only with 
   document.getElementById('today').textContent = `Date: ${dateKey}`;
 
   // Admin detect
-  const params = new URLSearchParams(location.search);
-  const isAdmin = params.get('admin') === ADMIN_KEY;
-  adminBox.style.display = isAdmin ? 'block' : 'none';
+  // const params = new URLSearchParams(location.search);
+  // const isAdmin = params.get('admin') === ADMIN_KEY;
+  // adminBox.style.display = isAdmin ? 'block' : 'none';
 
   let currentMeal = 'Breakfast';
 
