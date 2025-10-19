@@ -90,7 +90,7 @@
       </div>
 
       <div class="foot">
-        This is a student-run pilot. No names collected. Posts are public to readers of this page. Inappropriate content will be removed.
+        No names collected. Posts are public to readers of this page. Inappropriate content will be removed.
         <br/>
         
       </div>
@@ -228,23 +228,74 @@ logoutBtn.addEventListener('click', async ()=>{
     const path = mealPath(currentMeal).comments;
     commentsRef = firebase.database().ref(path).limitToLast(200);
     commentsRef.on('value', snap=>{
-      const data = snap.val() || {};
-      const items = Object.values(data).sort((a,b)=>a.ts-b.ts);
-      if(items.length===0){
-        listBox.innerHTML = '<div class="muted">No comments yet. Be the first.</div>';
-        return;
-      }
-      listBox.innerHTML = items.map(it=>{
-        const d = new Date(it.ts || Date.now());
-        const time = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
-        return `<div class="item">${escapeHtml(it.text)} <span class="badge">${time}</span></div>`;
-      }).join('');
+  const data = snap.val() || {};
+  const entries = Object.entries(data).sort((a,b)=> (a[1].ts||0) - (b[1].ts||0)); // [id, obj]
+
+  if (entries.length === 0) {
+    listBox.innerHTML = '<div class="muted">No comments yet. Be the first.</div>';
+    return;
+  }
+
+  listBox.innerHTML = entries.map(([id, it])=>{
+    const d = new Date(it.ts || Date.now());
+    const time = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const reportBtn = `<button class="report" data-id="${id}" style="margin-left:8px;background:#f59e0b">Report</button>`;
+    const dismissBtn = isAdmin ? `<button class="dismiss" data-id="${id}" style="margin-left:8px;background:#e11d48">Dismiss</button>` : "";
+    return `<div class="item">${escapeHtml(it.text)} <span class="badge">${time}</span>${reportBtn}${dismissBtn}</div>`;
+  }).join('');
+
+  // ---- button handlers ----
+  // (a) Report: report only once per browser
+  document.querySelectorAll('.report').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = btn.getAttribute('data-id');
+      const key = `flagged_${dateKey}_${currentMeal}_${id}`;
+      if (localStorage.getItem(key)) { alert('Already reported.'); return; }
+      localStorage.setItem(key, '1');
+      // flags counter increase (1 if none)
+      const path = `${mealPath(currentMeal).comments}/${id}/flags`;
+      const ref = firebase.database().ref(path);
+      ref.transaction(v => (v||0) + 1);
+      btn.textContent = 'Reported';
+      btn.disabled = true;
+    });
+  });
+
+  // (b) Dismiss: only deleted by admin
+  if (isAdmin) {
+    document.querySelectorAll('.dismiss').forEach(btn=>{
+      btn.addEventListener('click', ()=>{
+        const id = btn.getAttribute('data-id');
+        const path = `${mealPath(currentMeal).comments}/${id}`;
+        if (confirm('Delete this comment?')) {
+          firebase.database().ref(path).remove();
+        }
+      });
     });
   }
+});
 
   // Post comment
   sendBtn.addEventListener('click', ()=>{
     const text = msgInput.value.trim().slice(0,300);
+    // === (A) Words Filter ===
+const banned = ["fuck","shit","bitch","retard","slur1","slur2"]; 
+const bad = banned.find(w => text.toLowerCase().includes(w));
+if (bad) { postStatus.textContent = 'Blocked: inappropriate language.'; return; }
+
+// === (B) min/max length ===
+if (text.length < 1) { postStatus.textContent = 'Message too short.'; return; }
+if (text.length > 300) { postStatus.textContent = 'Message too long.'; return; }
+
+// === (C) Spamming cooldown (30 sec) ===
+const now = Date.now();
+const last = Number(localStorage.getItem('lastPostTs') || "0");
+if (now - last < 30_000) {
+  postStatus.textContent = 'Please wait a bit before posting again.';
+  return;
+}
+localStorage.setItem('lastPostTs', String(now));
+
     if(!text){ postStatus.textContent = 'Type something first.'; return; }
     const path = mealPath(currentMeal).comments;
     const id = firebase.database().ref().push().key;
